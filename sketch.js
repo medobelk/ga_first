@@ -238,9 +238,11 @@ let currentTime = 5;
 let initialTime = 5;
 let playerMoveAmount = 10;
 let lifecycleTime = 400; //in frames
-let maxPopulations = 500;
-let populations = 0;
+const mutation = 0.2;
+let maxPopulations = 5;
+let populationsGone = 0;
 let population = [];
+let candidates = [];
 
 function changeTime(direction, amount) {
     if (direction === '+') {
@@ -370,6 +372,7 @@ function populate(amount = 5) {
             step = moveDirections[Math.round((Math.random() * (4 - 1) + 1))];
 
             let newPlayerCoords = playerMovement(playerX, playerY, moveDirectionKey[step]);
+            newPlayerCoords.push(step);
             playerX = newPlayerCoords[0];
             playerY = newPlayerCoords[1];
 
@@ -377,8 +380,67 @@ function populate(amount = 5) {
         }
 
         population.push(member);
-        populations++;
     }
+
+    populationsGone++;
+}
+
+function crossover(momMoves, dadMoves) {
+    let separatePoint = parseInt(random(momMoves.length));
+    let childMoves = [];
+
+    for (let i = 0; i < momMoves.length; i++) {
+        if (i < separatePoint) {
+            childMoves.push(momMoves[i]);
+        } else {
+            childMoves.push(dadMoves[i]);
+        }
+    }
+
+    return childMoves;
+}
+
+function mutate(moves) {
+    let mutatedMoves = [];
+    mutatedMoves.push(...moves);
+
+    for (let i = 0; i < mutatedMoves.length; i++) {
+        if (random(1) < mutation) {
+            let move = mutatedMoves[i];
+            let prevMove;
+
+            if (mutatedMoves[i - 1]) {
+                prevMove = mutatedMoves[i - 1];
+            } else {
+                prevMove = mutatedMoves[i];
+            }
+
+            let availableSteps = Object.assign({}, moveDirectionKey);
+            delete availableSteps[move[2]];
+            let availableStepsNames = Object.keys(availableSteps);
+            availableSteps = Object.values(availableSteps);
+            let randomStepIndex = Math.round((Math.random() * (2 - 0) + 0));
+            let newPlayerCoords = playerMovement(prevMove[0], prevMove[1], availableSteps[randomStepIndex]);
+            newPlayerCoords.push(availableStepsNames[randomStepIndex]);
+            mutatedMoves[i] = newPlayerCoords;
+            let movesToRecalculate = mutatedMoves.splice(i + 1);
+            let recalculatedMoves = [];
+            let recalculateStartX = newPlayerCoords[0];
+            let recalculateStartY = newPlayerCoords[1];
+
+            for (let moveToRecalculate of movesToRecalculate) {
+                let newPlayerCoords = playerMovement(recalculateStartX, recalculateStartY, moveDirectionKey[moveToRecalculate[2]]);
+                recalculateStartX = newPlayerCoords[0];
+                recalculateStartY = newPlayerCoords[1];
+                newPlayerCoords.push(moveToRecalculate[2]);
+                recalculatedMoves.push(newPlayerCoords);
+            }
+
+            mutatedMoves.push(...recalculatedMoves);
+        }
+    }
+
+    return mutatedMoves;
 }
 
 function fitness() {
@@ -386,12 +448,23 @@ function fitness() {
     let bestFitness = 0;
 
     for (const member of population) {
-        let lastCoords = member[lifecycleTime - 1];
+        let lastCoords = member.moves[lifecycleTime - 1];
         let memberDist = dist(lastCoords[0], lastCoords[1], escapeX, escapeY);
         let memberFitness = ((initialDist - memberDist) / initialDist) * 100;
 
+        member.fitness = memberFitness;
+
         if (memberFitness > bestFitness) {
             bestFitness = memberFitness;
+        }
+    }
+
+    for (const member of population) {
+        let fitnessNormal = map(member.fitness, 0, bestFitness, 0, 1);
+        let n = parseInt(fitnessNormal * 100);  // Arbitrary multiplier
+
+        for (let j = 0; j < n; j++) {
+            candidates.push(member);
         }
     }
 
@@ -399,7 +472,24 @@ function fitness() {
 }
 
 function evolve() {
-    
+    population = [];
+
+    for (let p = 0; p < maxPopulations; p++) {
+        momIndex = parseInt(random(candidates.length));
+        dadIndex = parseInt(random(candidates.length));
+        mom = candidates[momIndex];
+        dad = candidates[dadIndex];
+
+        let child = {
+            fitness: 0,
+            moves: crossover(mom.moves, dad.moves),
+        };
+        child.moves = mutate(child.moves);
+
+        population.push(child);
+    }
+    populationsGone++;
+    $('#populations b').text(populationsGone);
 }
 
 function setup() {
@@ -413,13 +503,15 @@ function setup() {
         }
     }, 1000);
 
-    populate();
-    console.log(population);
+    populate(maxPopulations);
+    console.log(population[0].moves, '');
+    console.log(crossover(population[0].moves, population[0].moves), '');
 }
 
 let frame = 0;
 
 function draw() {
+    return;
     background(0);
     //place escape point
     fill(255);
@@ -435,7 +527,7 @@ function draw() {
     for (let memberIndex in population) {
         // console.log(memberIndex);
         let member = population[memberIndex];
-        let memberCoords = member[frame];
+        let memberCoords = member.moves[frame];
         fill(255, 255, 0);
         square(memberCoords[0], memberCoords[1], playerSize);
     }
@@ -443,9 +535,12 @@ function draw() {
     frame++;
 
     if (frame >= lifecycleTime) {
-        noLoop();
+        if (populationsGone === 3000) {
+            noLoop();
+        }
         fitness();
         evolve();
+        frame = 0;
     }
 
     if (currentTime <= 0) {
